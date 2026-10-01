@@ -197,6 +197,48 @@ async def test_interrupted_anthropic_stream_recovers_output_tokens_off_the_event
 
 
 @pytest.mark.asyncio
+async def test_anthropic_in_band_error_dispatches_failure_not_success(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    error_frame = (
+        b"event: error\n"
+        b'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n'
+    )
+    logging_obj = _logging_obj()
+    logging_obj.model_call_details = {"model": "claude-fable-5", "stream": True}
+    logging_obj.litellm_params = {}
+    logging_obj.dispatch_success_handlers = AsyncMock()
+    logging_obj.dispatch_failure_handlers = AsyncMock()
+    partial_usage = MagicMock()
+    monkeypatch.setattr(
+        PassThroughStreamingHandler,
+        "_record_partial_usage_for_failure",
+        partial_usage,
+    )
+
+    await PassThroughStreamingHandler._route_streaming_logging_to_handler(
+        litellm_logging_obj=logging_obj,
+        passthrough_success_handler_obj=PassThroughEndpointLogging(),
+        url_route="/anthropic/v1/messages",
+        request_body={"model": "claude-fable-5", "stream": True},
+        endpoint_type=EndpointType.ANTHROPIC,
+        start_time=datetime.now(),
+        raw_bytes=[error_frame],
+        end_time=datetime.now(),
+        model="claude-fable-5",
+    )
+    await GLOBAL_LOGGING_WORKER.flush()
+
+    logging_obj.dispatch_success_handlers.assert_not_awaited()
+    logging_obj.dispatch_failure_handlers.assert_awaited_once()
+    exception = logging_obj.dispatch_failure_handlers.await_args.args[0]
+    assert exception.status_code == 503
+    assert "Overloaded" in str(exception)
+    partial_usage.assert_called_once()
+    assert logging_obj.model_call_details["prompt_cache_response_complete"] is False
+
+
+@pytest.mark.asyncio
 async def test_failed_anthropic_stream_records_partial_usage_off_the_event_loop():
     from unittest.mock import AsyncMock
 
