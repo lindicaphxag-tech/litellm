@@ -78,9 +78,15 @@ class JevClassifierClient(Protocol):
 
 
 class HttpJevClassifierClient:
-    def __init__(self, api_key: str, api_base: str, http_client: AsyncHTTPHandler) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        api_base: str,
+        http_client: AsyncHTTPHandler,
+        api_url: str | None = None,
+    ) -> None:
         self._api_key = api_key
-        self._api_base = api_base.rstrip("/")
+        self._api_url = api_url or f"{api_base.rstrip('/')}/v1/systemone"
         self._http_client = http_client
 
     async def evaluate(
@@ -91,7 +97,7 @@ class HttpJevClassifierClient:
     ) -> JevSystemOneResponse:
         start_time: Final = datetime.now(timezone.utc)
         response: Final = await self._http_client.post(  # pyright: ignore[reportUnknownMemberType]  # AsyncHTTPHandler has a dynamic post signature
-            f"{self._api_base}/v1/systemone",
+            self._api_url,
             json=request.model_dump(mode="json"),
             headers=MappingProxyType(
                 {
@@ -106,7 +112,10 @@ class HttpJevClassifierClient:
             self._log_response(request, response, request_kwargs, start_time)
         except Exception as exc:  # noqa: BLE001  # logging integrations must not discard a provider verdict
             verbose_router_logger.warning("JEV response logging failed (%s)", type(exc).__name__)
-        return TypeAdapter(JevSystemOneResponse).validate_python(response.json())
+        body: Final = TypeAdapter(dict[str, object]).validate_python(response.json())
+        result: Final = body.get("result")
+        payload: Final = result if isinstance(result, Mapping) else body
+        return TypeAdapter(JevSystemOneResponse).validate_python(payload)
 
     @staticmethod
     def _log_response(

@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 import litellm
+import litellm.router_strategy.complexity_router.complexity_router as complexity_router_module
 from litellm._logging import verbose_router_logger
 from litellm.constants import INTERNAL_CALL_ORIGIN_METADATA_KEY
 from litellm.integrations.custom_logger import CustomLogger
@@ -513,6 +514,79 @@ def test_jev_classifier_cost_is_none_without_registry_pricing() -> None:
         usage=JevUsage(input_tokens=3, output_tokens=4),
     )
     assert jev_classifier_cost(response, "jev-unpriced") is None
+
+
+def test_jev_api_url_requires_its_own_key() -> None:
+    with pytest.raises(ValueError, match=r"api_url requires jev_classifier_config\.api_key"):
+        JevClassifierConfig(api_url="https://provider.test/exact")
+
+
+def test_jev_explicit_environment_references_are_resolved_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        "os.environ/CLOUDFLARE_URL": "https://api.cloudflare.test/exact",
+        "os.environ/CLOUDFLARE_KEY": "cf-secret",
+    }
+    monkeypatch.setattr(complexity_router_module, "get_secret_str", values.get)
+    http_client = create_autospec(AsyncHTTPHandler, instance=True)
+    monkeypatch.setattr(complexity_router_module, "get_async_httpx_client", lambda _: http_client)
+
+    client = ComplexityRouter._build_jev_client(
+        JevClassifierConfig(
+            api_url="os.environ/CLOUDFLARE_URL",
+            api_key="os.environ/CLOUDFLARE_KEY",
+        )
+    )
+
+    assert client._api_url == "https://api.cloudflare.test/exact"
+    assert client._api_key == "cf-secret"
+
+    with pytest.raises(ValueError, match="api_url references an unset environment variable"):
+        ComplexityRouter._resolve_jev_config_value("os.environ/MISSING_URL", "api_url")
+
+
+@pytest.mark.asyncio
+async def test_http_jev_classifier_client_uses_exact_url_and_cloudflare_result() -> None:
+    captured: dict[str, object] = {}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["Authorization"]
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "result": {
+                    "model": "clef",
+                    "answers": {
+                        "tier": {
+                            "type": "choice",
+                            "choice": "SIMPLE",
+                            "probabilities": {"SIMPLE": 1.0},
+                            "confidence": 1.0,
+                        }
+                    },
+                },
+            },
+        )
+
+    handler: Final = AsyncHTTPHandler()
+    handler.client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    client: Final = HttpJevClassifierClient(
+        "secret",
+        "https://typesafe.test",
+        handler,
+        api_url="https://api.cloudflare.test/client/v4/accounts/a/ai/run/@cf/cloudflare/clef",
+    )
+    request: Final = build_jev_request("Hello", None, "clef", DEFAULT_JEV_INSTRUCTIONS, {"SIMPLE": "facts"})
+    response: Final = await client.evaluate(request, 1.0)
+    await handler.client.aclose()
+
+    assert captured["url"] == "https://api.cloudflare.test/client/v4/accounts/a/ai/run/@cf/cloudflare/clef"
+    assert captured["authorization"] == "Bearer secret"
+    assert response.model == "clef"
+    assert response.answers["tier"].choice == "SIMPLE"
 
 
 @pytest.mark.asyncio

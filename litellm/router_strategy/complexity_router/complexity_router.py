@@ -1308,14 +1308,34 @@ class ComplexityRouter(CustomLogger):
     """
 
     @staticmethod
+    def _resolve_jev_config_value(value: str, field: str) -> str:
+        if not value.startswith("os.environ/"):
+            return value
+        resolved: Final = get_secret_str(value)
+        if not resolved:
+            raise ValueError(f"jev_classifier_config.{field} references an unset environment variable")
+        return resolved
+
+    @staticmethod
     def _build_jev_client(config: JevClassifierConfig) -> JevClassifierClient:
-        api_key: Final = config.api_key or get_secret_str("TYPESAFE_API_KEY")
+        api_key: Final = (
+            ComplexityRouter._resolve_jev_config_value(config.api_key, "api_key")
+            if config.api_key is not None
+            else get_secret_str("TYPESAFE_API_KEY")
+        )
         if not api_key:
             raise ValueError("jev_classifier_config.api_key or TYPESAFE_API_KEY is required for classifier_type 'jev'")
+
+        api_url: Final = (
+            ComplexityRouter._resolve_jev_config_value(config.api_url, "api_url")
+            if config.api_url is not None
+            else None
+        )
         api_base: Final = config.api_base or get_secret_str("TYPESAFE_API_BASE") or "https://api.typesafe.ai"
         return HttpJevClassifierClient(
             api_key=api_key,
             api_base=api_base,
+            api_url=api_url,
             http_client=get_async_httpx_client(httpxSpecialProvider.PassThroughEndpoint),
         )
 

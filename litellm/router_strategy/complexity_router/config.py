@@ -19,6 +19,7 @@ from pydantic import (
     Field,
     SkipValidation,
     StrictFloat,
+    ValidationInfo,
     field_serializer,
     field_validator,
     model_validator,
@@ -683,6 +684,10 @@ class JevClassifierConfig(BaseModel):
         default=None,
         description="TypeSafe API base, falling back to TYPESAFE_API_BASE and then https://api.typesafe.ai",
     )
+    api_url: str | None = Field(
+        default=None,
+        description="Exact Jev-compatible classifier URL. Takes precedence over api_base.",
+    )
     timeout_ms: int = Field(default=3000, ge=1)
     instructions: str | None = Field(
         default=None,
@@ -698,18 +703,19 @@ class JevClassifierConfig(BaseModel):
             raise ValueError("jev_classifier_config.instructions must be non-empty; omit it to use the default")
         return value
 
-    @field_validator("api_key")
+    @field_validator("api_key", "api_base", "api_url")
     @classmethod
-    def _reject_blank_api_key(cls, value: str | None) -> str | None:
+    def _reject_blank_endpoint_values(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is not None and not value.strip():
-            raise ValueError("jev_classifier_config.api_key must be non-empty; omit it to use TYPESAFE_API_KEY")
+            raise ValueError(f"jev_classifier_config.{info.field_name} must be non-empty when configured")
         return value
 
     @model_validator(mode="after")
-    def _keep_the_environment_key_on_the_environment_base(self) -> "JevClassifierConfig":
-        if self.api_base is not None and self.api_key is None:
+    def _keep_the_environment_key_on_the_environment_endpoint(self) -> "JevClassifierConfig":
+        if (self.api_base is not None or self.api_url is not None) and self.api_key is None:
+            field: Final = "api_url" if self.api_url is not None else "api_base"
             raise ValueError(
-                "jev_classifier_config.api_base requires jev_classifier_config.api_key: TYPESAFE_API_KEY is only sent "
+                f"jev_classifier_config.{field} requires jev_classifier_config.api_key: TYPESAFE_API_KEY is only sent "
                 "to TYPESAFE_API_BASE or https://api.typesafe.ai"
             )
         return self
