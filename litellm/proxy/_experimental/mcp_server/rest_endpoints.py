@@ -246,6 +246,7 @@ if MCP_AVAILABLE:
     from litellm.proxy._experimental.mcp_server.tool_catalog_guard import (
         apply_description_overrides,
         scan_tool_descriptions,
+        snapshot_pinned_tool,
     )
     from litellm.types.mcp_server.mcp_server_manager import PinnedMCPTool
 
@@ -782,7 +783,7 @@ if MCP_AVAILABLE:
         )
         pinnable: Final = frozenset(tool.name for tool in scan.served)
         return {
-            tool.name: PinnedMCPTool(description=tool.description or "", input_schema=tool.input_schema)
+            tool.name: snapshot_pinned_tool(tool)
             for tool in upstream
             if tool.name in pinnable
         }

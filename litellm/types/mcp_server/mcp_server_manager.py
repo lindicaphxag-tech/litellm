@@ -69,12 +69,18 @@ class MCPOAuthIdentityBinding(BaseModel):
 
 
 class PinnedMCPTool(BaseModel):
-    """One tool of an admin-pinned catalog: the description and input schema tools/list keeps serving."""
+    """One tool of an admin-pinned catalog.
+
+    tool_definition stores the complete MCP Tool payload except for the name,
+    which is the surrounding mapping key. The legacy fields remain so pins
+    written before full-definition snapshots were introduced keep loading.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     description: str = ""
     input_schema: dict[str, object] = Field(default_factory=dict)
+    tool_definition: dict[str, object] | None = None
 
 
 _PINNED_TOOLS: Final[TypeAdapter[dict[str, PinnedMCPTool] | None]] = TypeAdapter(dict[str, PinnedMCPTool] | None)

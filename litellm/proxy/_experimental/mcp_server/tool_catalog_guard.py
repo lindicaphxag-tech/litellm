@@ -137,11 +137,30 @@ def pin_tool_catalog(
     return served, drift
 
 
+def snapshot_pinned_tool(tool: MCPTool) -> PinnedMCPTool:
+    """Capture every MCP Tool field while retaining legacy pin fields."""
+
+    return PinnedMCPTool(
+        description=tool.description or "",
+        input_schema=tool.input_schema,
+        tool_definition=tool.model_dump(mode="json", by_alias=True, exclude={"name"}),
+    )
+
+
+def _tool_definition(tool: MCPTool) -> dict[str, object]:
+    return tool.model_dump(mode="json", by_alias=True, exclude={"name"})
+
+
 def _drifted(tool: MCPTool, pinned: PinnedMCPTool) -> bool:
+    if pinned.tool_definition is not None:
+        return _tool_definition(tool) != pinned.tool_definition
     return (tool.description or "") != pinned.description or tool.input_schema != pinned.input_schema
 
 
 def _pinned_tool(tool: MCPTool, pinned: PinnedMCPTool) -> MCPTool:
+    if pinned.tool_definition is not None:
+        return MCPTool.model_validate({**pinned.tool_definition, "name": tool.name})
+
     entry: Final[_ServedCatalogEntry] = {
         "description": pinned.description or None,
         "input_schema": pinned.input_schema,
