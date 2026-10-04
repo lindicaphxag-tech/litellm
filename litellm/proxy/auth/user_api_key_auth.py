@@ -1160,6 +1160,33 @@ async def _lookup_jwt_mapping_token_hash(
     return global_row
 
 
+def _validate_jwt_mapped_key_team_claim(
+    jwt_claims: dict,
+    jwt_handler: JWTHandler,
+    valid_token: UserAPIKeyAuth,
+) -> None:
+    """Reject a mapped virtual key whose team conflicts with the current JWT.
+
+    JWT-to-key mappings are keyed by the configured virtual-key claim and can
+    outlive a caller's current team claim. Reusing a previously mapped key
+    without re-validating the signed team claim can therefore apply another
+    application's team-scoped models and budgets.
+
+    Tokens without an explicit team claim preserve the existing behavior.
+    """
+
+    claimed_team_ids: Final[list[str]] = jwt_handler.get_all_jwt_team_ids(jwt_claims)
+    if not claimed_team_ids:
+        return
+
+    mapped_team_id: Final = valid_token.team_id
+    if mapped_team_id is None or str(mapped_team_id) not in claimed_team_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="JWT team claim does not authorize the mapped virtual key team.",
+        )
+
+
 async def _resolve_jwt_to_virtual_key(
     jwt_claims: dict,
     jwt_handler: JWTHandler,
@@ -1723,6 +1750,11 @@ async def _user_api_key_auth_builder(
                         valid_token = resolve_result
                         api_key = valid_token.token or ""
                         valid_token.jwt_claims = jwt_claims
+                        _validate_jwt_mapped_key_team_claim(
+                            jwt_claims=jwt_claims or {},
+                            jwt_handler=jwt_handler,
+                            valid_token=valid_token,
+                        )
                         do_standard_jwt_auth = False
                         # Fall through to virtual key checks
                         if valid_token.user_id is not None and valid_token.user_email is None:
