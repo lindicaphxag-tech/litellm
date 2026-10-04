@@ -14,6 +14,7 @@ from litellm._logging import verbose_proxy_logger
 import logging
 import litellm
 from litellm.proxy.auth.user_api_key_auth import (
+    _validate_jwt_mapped_key_team_claim,
     user_api_key_auth,
     UserAPIKeyAuth,
     get_api_key_from_custom_header,
@@ -21,6 +22,63 @@ from litellm.proxy.auth.user_api_key_auth import (
 from fastapi import WebSocket, HTTPException, status
 
 from litellm.proxy._types import LiteLLM_UserTable, LitellmUserRoles
+
+
+def _jwt_handler_with_team_claims(*, singular: str | None = None, plural: str | None = None) -> JWTHandler:
+    handler = JWTHandler()
+    handler.litellm_jwtauth = LiteLLM_JWTAuth(
+        team_id_jwt_field=singular,
+        team_ids_jwt_field=plural,
+    )
+    return handler
+
+
+def test_mapped_jwt_key_allows_matching_singular_team_claim():
+    handler = _jwt_handler_with_team_claims(singular="team")
+    token = UserAPIKeyAuth(team_id="team-a")
+
+    _validate_jwt_mapped_key_team_claim(
+        jwt_claims={"team": "team-a"},
+        jwt_handler=handler,
+        valid_token=token,
+    )
+
+
+def test_mapped_jwt_key_allows_team_present_in_plural_claim():
+    handler = _jwt_handler_with_team_claims(plural="teams")
+    token = UserAPIKeyAuth(team_id="team-b")
+
+    _validate_jwt_mapped_key_team_claim(
+        jwt_claims={"teams": ["team-a", "team-b"]},
+        jwt_handler=handler,
+        valid_token=token,
+    )
+
+
+def test_mapped_jwt_key_rejects_conflicting_team_claim():
+    handler = _jwt_handler_with_team_claims(singular="team")
+    token = UserAPIKeyAuth(team_id="team-a")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_jwt_mapped_key_team_claim(
+            jwt_claims={"team": "team-b"},
+            jwt_handler=handler,
+            valid_token=token,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+    assert "does not authorize" in str(exc_info.value.detail)
+
+
+def test_mapped_jwt_key_without_explicit_team_claim_keeps_existing_behavior():
+    handler = _jwt_handler_with_team_claims()
+    token = UserAPIKeyAuth(team_id="team-a")
+
+    _validate_jwt_mapped_key_team_claim(
+        jwt_claims={"sub": "user-a"},
+        jwt_handler=handler,
+        valid_token=token,
+    )
 
 
 class Request:
