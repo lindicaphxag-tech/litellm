@@ -4071,7 +4071,7 @@ def _deployment_pick_attributes(model: str, request: Mapping[str, object]) -> Ma
 def _region_routable(
     records: Sequence[Mapping[str, object]],
     request: Mapping[str, object],
-    has_input: bool,
+    _has_input: bool,
     pre_call_checks: bool,
 ) -> Sequence[Mapping[str, object]]:
     """``records`` without the ones ``_pre_call_checks`` keeps the request away from for being
