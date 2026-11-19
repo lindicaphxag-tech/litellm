@@ -4080,7 +4080,8 @@ def _region_routable(
     from litellm.utils import is_region_allowed
 
     allowed: Final = request.get("allowed_model_region")
-    if allowed is None or not pre_call_checks or not has_input:
+    # Geographic policy applies independently of whether the request has messages/input.
+    if allowed is None or not pre_call_checks:
         return records
     if not isinstance(allowed, str):
         return ()
